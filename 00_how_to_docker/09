@@ -1,0 +1,6 @@
+# On cree au prealable un container debian et on va dans son shell
+# Ensuite dans le container
+apt-get update
+apt-get upgrade
+apt-get install gcc
+apt-get install git
