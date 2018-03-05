@@ -1,1 +1,1 @@
-docker rmi -f $(docker images -aq)
+docker image rm -f $(docker image ls -aq)
