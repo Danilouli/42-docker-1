@@ -1,4 +1,4 @@
-FROM debian:latest
+FROM ubuntu:latest
 LABEL maintainer gitlabdead@eheh.cq
 
 RUN apt-get update -y
@@ -48,10 +48,10 @@ RUN sudo adduser --disabled-login --gecos 'GitLab' git
 
 # PostgreSQL Install
 RUN sudo apt-get install -y postgresql postgresql-client libpq-dev postgresql-contrib
-RUN sudo service postgresql start
-RUN sudo -u postgres psql -d template1 -c "CREATE USER git CREATEDB;"
-RUN sudo -u postgres psql -d template1 -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
-RUN sudo -u postgres psql -d template1 -c "CREATE DATABASE gitlabhq_production OWNER git;"
+RUN sudo service postgresql start && \
+	sudo -u postgres psql -d template1 -c "CREATE USER git CREATEDB;" && \
+	sudo -u postgres psql -d template1 -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;" && \
+	sudo -u postgres psql -d template1 -c "CREATE DATABASE gitlabhq_production OWNER git;"
 
 # Redis
 RUN sudo apt-get install redis-server -y
@@ -70,4 +70,67 @@ RUN sudo usermod -aG redis git
 WORKDIR /home/git
 RUN sudo -u git -H git clone https://gitlab.com/gitlab-org/gitlab-ce.git -b 10-5-stable gitlab
 WORKDIR /home/git/gitlab
+RUN sudo -u git -H cp config/gitlab.yml.example config/gitlab.yml
+#RUN sudo -u git -H editor config/gitlab.yml
+RUN sudo -u git -H cp config/secrets.yml.example config/secrets.yml
+RUN sudo -u git -H chmod 0600 config/secrets.yml
+RUN sudo chown -R git log/
+RUN sudo chown -R git tmp/
+RUN sudo chmod -R u+rwX,go-w log/
+RUN sudo chmod -R u+rwX tmp/
+RUN sudo chmod -R u+rwX tmp/pids/
+RUN sudo chmod -R u+rwX tmp/sockets/
+RUN sudo -u git -H mkdir public/uploads/
+RUN sudo chmod 0700 public/uploads
+RUN sudo chmod -R u+rwX builds/
+RUN sudo chmod -R u+rwX shared/artifacts/
+RUN sudo chmod -R ug+rwX shared/pages/
+RUN sudo -u git -H cp config/unicorn.rb.example config/unicorn.rb
+#RUN nproc && sudo -u git -H editor config/unicorn.rb
+RUN sudo -u git -H cp config/initializers/rack_attack.rb.example config/initializers/rack_attack.rb
+RUN sudo -u git -H git config --global core.autocrlf input
+RUN sudo -u git -H git config --global gc.auto 0
+RUN sudo -u git -H git config --global repack.writeBitmaps true
+RUN sudo -u git -H git config --global receive.advertisePushOptions true
+RUN sudo -u git -H cp config/resque.yml.example config/resque.yml
+#RUN sudo -u git -H editor config/resque.yml
 
+# Gitlab DB Settings
+RUN sudo -u git cp config/database.yml.postgresql config/database.yml
+RUN sudo -u git -H chmod o-rwx config/database.yml
+RUN sudo -u git -H bundle install --deployment --without development test mysql aws kerberos
+
+# GitLab Shell
+#WORKDIR /home/git/gitlab-shell
+#RUN git init .
+#RUN git remote add origin https://gitlab.com/gitlab-org/gitlab-shell.git
+#RUN git pull origin master
+#RUN sudo -u git -H git fetch --all --tags && \
+#	sudo -u git -H git checkout v$(</home/git/gitlab/GITLAB_SHELL_VERSION)
+#RUN ls -la
+#RUN chmod 777 /home/git/gitlab-shell/.gitlab_shell_secret
+#WORKDIR /home/git/gitlab
+RUN sudo -u git -H bundle exec rake "gitlab:shell:install[v6.0.3]" REDIS_URL=unix:/var/run/redis/redis.sock RAILS_ENV=production SKIP_STORAGE_VALIDATION=true
+RUN sudo -u git -H bundle exec rake "gitlab:workhorse:install[/home/git/gitlab-workhorse]" RAILS_ENV=production
+#RUN sudo -u git -H bundle exec rake gitlab:setup RAILS_ENV=production
+RUN sudo cp lib/support/init.d/gitlab /etc/init.d/gitlab
+RUN sudo update-rc.d gitlab defaults 21
+# Gitaly pizza
+RUN sudo -u git -H bundle exec rake "gitlab:gitaly:install[/home/git/gitaly]" RAILS_ENV=production
+RUN sudo chmod 0700 /home/git/gitlab/tmp/sockets/private
+RUN sudo chown git /home/git/gitlab/tmp/sockets/private
+# Logrotate
+RUN sudo cp lib/support/logrotate/gitlab /etc/logrotate.d/gitlab
+# Launch
+RUN sudo -u git -H bundle exec rake gettext:compile RAILS_ENV=production
+RUN sudo -u git -H yarn install --production --pure-lockfile
+RUN sudo -u git -H bundle exec rake gitlab:assets:compile RAILS_ENV=production NODE_ENV=production
+RUN sudo service gitlab start
+#OU RUN sudo /etc/init.d/gitlab restart
+
+# Nginx
+RUN sudo apt-get install -y nginx
+RUN sudo cp lib/support/nginx/gitlab /etc/nginx/sites-available/gitlab
+RUN sudo ln -s /etc/nginx/sites-available/gitlab /etc/nginx/sites-enabled/gitlab
+
+CMD sudo service postgresql restart && sudo service gitlab restart

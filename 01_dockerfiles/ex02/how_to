@@ -1,0 +1,4 @@
+docker build -t ft_rails .
+docker build -t my_ror -f Dockerfile_child
+docker run -p 3000:3000 --rm my_ror
+
